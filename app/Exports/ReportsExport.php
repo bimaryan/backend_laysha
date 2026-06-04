@@ -3,32 +3,45 @@
 namespace App\Exports;
 
 use Maatwebsite\Excel\Concerns\FromCollection;
+use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
+use Maatwebsite\Excel\Concerns\WithStyles;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class ReportsExport implements FromCollection, WithHeadings, WithMapping
+class ReportsExport implements FromCollection, ShouldAutoSize, WithHeadings, WithMapping, WithStyles
 {
-    protected $reports;
+    protected $messages;
 
-    public function __construct($reports)
+    public function __construct($messages)
     {
-        $this->reports = $reports;
+        // Data yang diterima sekarang adalah kumpulan pesan (Collection of Messages)
+        $this->messages = $messages;
     }
 
     public function collection()
     {
-        return $this->reports;
+        return $this->messages;
     }
 
-    // Mapping kolom yang ingin dimunculkan di Excel
-    public function map($report): array
+    // Mapping kolom yang ingin dimunculkan di Excel per baris
+    public function map($message): array
     {
+        // Rapihkan penamaan label pengirim
+        $roleLabel = 'Warga';
+        if ($message['role'] === 'ai') {
+            $roleLabel = 'SafeTalk AI';
+        } elseif ($message['role'] === 'admin') {
+            $roleLabel = 'Admin DP3A';
+        }
+
         return [
-            $report->case_id,
-            $report->user->nama_lengkap ?? 'Anonymous',
-            $report->messages->first()->message ?? '-',
-            $report->latest_category ?? 'Umum',
-            $report->updated_at->format('d/m/Y H:i'),
+            $message['case_id'],
+            $message['kategori'],
+            $message['nama_warga'],
+            $roleLabel,
+            $message['pesan'],
+            $message['waktu'],
         ];
     }
 
@@ -37,10 +50,19 @@ class ReportsExport implements FromCollection, WithHeadings, WithMapping
     {
         return [
             'ID Kasus',
-            'Pengirim',
-            'Pesan Terakhir',
             'Kategori Risiko',
-            'Waktu Update',
+            'Nama Pelapor',
+            'Pengirim Pesan',
+            'Isi Teks / Obrolan',
+            'Waktu Dikirim',
+        ];
+    }
+
+    // Memberikan style tebal (Bold) pada baris pertama (Header)
+    public function styles(Worksheet $sheet)
+    {
+        return [
+            1 => ['font' => ['bold' => true]],
         ];
     }
 }

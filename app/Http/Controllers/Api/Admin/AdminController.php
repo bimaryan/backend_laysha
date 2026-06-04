@@ -154,8 +154,9 @@ class AdminController extends Controller
     {
         $search = $request->query('search');
 
+        // 1. Ambil data ruangan beserta SEMUA pesannya (diurutkan dari terlama ke terbaru)
         $reports = ChatRoom::with(['user:id,nama_lengkap', 'messages' => function ($q) {
-            $q->latest()->limit(1);
+            $q->orderBy('created_at', 'asc');
         }])
             ->when($search, function ($query) use ($search) {
                 $query->where(function ($q) use ($search) {
@@ -166,8 +167,25 @@ class AdminController extends Controller
                 });
             })
             ->orderBy('updated_at', 'desc')
-            ->get(); // Ambil semua data (tanpa paginate) untuk export
+            ->get();
 
-        return Excel::download(new ReportsExport($reports), 'laporan-safetalk-'.now()->format('Y-m-d').'.xlsx');
+        // 2. Ekstrak data: 1 baris Excel = 1 Pesan (Bukan 1 Room)
+        $allMessages = collect();
+
+        foreach ($reports as $room) {
+            foreach ($room->messages as $msg) {
+                $allMessages->push([
+                    'case_id' => $room->case_id,
+                    'kategori' => $room->latest_category ?? 'Umum',
+                    'nama_warga' => $room->user->nama_lengkap ?? 'Anonymous',
+                    'role' => $msg->sender_type,
+                    'pesan' => $msg->message,
+                    'waktu' => $msg->created_at->format('d/m/Y H:i:s'),
+                ]);
+            }
+        }
+
+        // 3. Download Excel
+        return Excel::download(new ReportsExport($allMessages), 'laporan-safetalk-'.now()->format('Y-m-d').'.xlsx');
     }
 }

@@ -68,7 +68,7 @@ class ChatController extends Controller
             'chat_room_id' => $room->id,
             'sender_type' => 'user',
             'message' => $request->message,
-            'reply_to_id' => $request->reply_to_id,
+            'reply_to_id' => $request->reply_to_id ?? null,
         ]);
 
         if ($room->is_locked) {
@@ -77,17 +77,14 @@ class ChatController extends Controller
 
         // 3. Panggil AI (FastAPI)
         try {
-            // SINKRONISASI: Path endpoint diubah menjadi '/api/chat'
-            // Ganti URL domain ini dengan localhost (http://127.0.0.1:8000/api/chat) jika diuji di lokal
-            $response = Http::withoutVerifying()->post('http://127.0.0.1:8111/api/chat', [
-                // SINKRONISASI: Key diubah dari 'pesan_teks' menjadi 'pesan' menyesuaikan class ChatRequest FastAPI
+            // Tambahkan timeout(30) agar request tidak menggantung jika API LLM merespons lama
+            $response = Http::withoutVerifying()->timeout(30)->post('http://127.0.0.1:8222/api/chat', [
                 'pesan' => $request->message,
             ]);
 
             if ($response->successful()) {
                 $aiData = $response->json();
 
-                // SINKRONISASI: Key diubah dari 'kode_kategori' menjadi 'kategori_prediksi' menyesuaikan output FastAPI
                 $kategori = $aiData['kategori_prediksi'] ?? 'NON_KDRT';
 
                 // Sesuaikan status darurat (Di FastAPI K5 adalah Darurat/Nyawa Terancam)
@@ -107,10 +104,8 @@ class ChatController extends Controller
                 ChatMessage::create([
                     'chat_room_id' => $room->id,
                     'sender_type' => 'ai',
-                    // SINKRONISASI: Key diubah dari 'rekomendasi_sistem' menjadi 'balasan_bot' menyesuaikan output FastAPI
                     'message' => $aiData['balasan_bot'] ?? 'Pesan Anda telah kami terima.',
                     'reply_to_id' => $userMsg->id,
-                    // Instruksi singkat diambil dari method getInstruction
                     'instruction' => $this->getInstruction($kategori),
                 ]);
 
@@ -122,6 +117,38 @@ class ChatController extends Controller
             return response()->json(['error' => 'Service Down: '.$e->getMessage()], 500);
         }
     }
+
+    // --- TAMBAHAN: Fungsi destroy untuk rute DELETE /chat/history ---
+    public function destroy(Request $request)
+    {
+        $userId = Auth::guard('sanctum')->id();
+        $sessionId = $request->header('X-Session-ID');
+
+        $room = ChatRoom::where(function ($q) use ($userId, $sessionId) {
+            if ($userId) {
+                $q->where('user_id', $userId);
+            } else {
+                $q->where('session_id', $sessionId);
+            }
+        })->first();
+
+        if ($room) {
+            // Hapus semua pesan di dalam ruangan ini
+            $room->messages()->delete();
+
+            // Reset status ruang chat agar seperti baru
+            $room->update([
+                'is_locked' => false,
+                'latest_category' => null,
+                'case_id' => 'UMUM-'.date('Ymd').'-'.strtoupper(Str::random(4)),
+            ]);
+
+            return response()->json(['status' => 'success', 'message' => 'Riwayat obrolan berhasil dihapus.']);
+        }
+
+        return response()->json(['status' => 'error', 'message' => 'Ruangan chat tidak ditemukan.'], 404);
+    }
+    // ----------------------------------------------------------------
 
     private function getInstruction($kategori)
     {
