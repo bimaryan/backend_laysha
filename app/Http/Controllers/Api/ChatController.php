@@ -78,7 +78,7 @@ class ChatController extends Controller
         // 3. Panggil AI (FastAPI)
         try {
             // Tambahkan timeout(30) agar request tidak menggantung jika API LLM merespons lama
-            $response = Http::withoutVerifying()->timeout(30)->post('http://127.0.0.1:8222/api/chat', [
+            $response = Http::withoutVerifying()->timeout(30)->post('https://fastapi-laysha.safetalkai.my.id/api/chat', [
                 'pesan' => $request->message,
             ]);
 
