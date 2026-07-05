@@ -77,6 +77,7 @@ class AdminController extends Controller
     public function getAllReports(Request $request)
     {
         $search = $request->query('search');
+        $month = $request->query('month');
 
         $reports = ChatRoom::with(['user:id,nama_lengkap', 'messages' => function ($q) {
             $q->latest()->limit(1);
@@ -90,6 +91,10 @@ class AdminController extends Controller
                             $u->where('nama_lengkap', 'LIKE', '%'.$search.'%');
                         });
                 });
+            })
+            ->when($month, function ($query) use ($month) {
+                $query->whereMonth('updated_at', substr($month, 5, 2))
+                      ->whereYear('updated_at', substr($month, 0, 4));
             })
             ->orderBy('updated_at', 'desc')
             ->paginate(15)
@@ -153,6 +158,7 @@ class AdminController extends Controller
     public function exportReports(Request $request)
     {
         $search = $request->query('search');
+        $month = $request->query('month');
 
         // 1. Ambil data ruangan beserta SEMUA pesannya (diurutkan dari terlama ke terbaru)
         $reports = ChatRoom::with(['user:id,nama_lengkap', 'messages' => function ($q) {
@@ -165,6 +171,10 @@ class AdminController extends Controller
                             $u->where('nama_lengkap', 'LIKE', '%'.$search.'%');
                         });
                 });
+            })
+            ->when($month, function ($query) use ($month) {
+                $query->whereMonth('updated_at', substr($month, 5, 2))
+                      ->whereYear('updated_at', substr($month, 0, 4));
             })
             ->orderBy('updated_at', 'desc')
             ->get();
