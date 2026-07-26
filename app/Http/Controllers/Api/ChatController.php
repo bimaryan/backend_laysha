@@ -56,24 +56,7 @@ class ChatController extends Controller
         $request->validate(['message' => 'required|string']);
         $sessionId = $request->header('X-Session-ID') ?? Str::uuid()->toString();
         $userId = Auth::guard('sanctum')->id();
-
-        // 1. Cari atau Buat Ruangan Chat
-        $room = ChatRoom::firstOrCreate(
-            ['user_id' => $userId, 'session_id' => $userId ? null : $sessionId],
-            ['case_id' => 'UMUM-'.date('Ymd').'-'.strtoupper(Str::random(4))]
-        );
-
-        // 2. Simpan Pesan Warga
-        $userMsg = ChatMessage::create([
-            'chat_room_id' => $room->id,
-            'sender_type' => 'user',
-            'message' => $request->message,
-            'reply_to_id' => $request->reply_to_id ?? null,
-        ]);
-
-        if ($room->is_locked) {
-            return response()->json(['status' => 'success', 'is_locked' => true, 'session_id' => $sessionId]);
-        }
+        $isAnonymous = ! $userId;
 
         // 3. Panggil AI (FastAPI)
         try {
@@ -84,11 +67,45 @@ class ChatController extends Controller
 
             if ($response->successful()) {
                 $aiData = $response->json();
-
                 $kategori = $aiData['kategori_prediksi'] ?? 'NON_KDRT';
 
                 // Sesuaikan status darurat (Di FastAPI K5 adalah Darurat/Nyawa Terancam)
                 $isEmergency = in_array($kategori, ['K5']);
+                $shouldPersistToDb = ! $isAnonymous || $isEmergency;
+
+                if (! $shouldPersistToDb) {
+                    return response()->json([
+                        'status' => 'success',
+                        'session_id' => $sessionId,
+                        'is_locked' => false,
+                        'persist_to_db' => false,
+                        'store_locally' => true,
+                    ]);
+                }
+
+                // 1. Cari atau Buat Ruangan Chat
+                $room = ChatRoom::firstOrCreate(
+                    ['user_id' => $userId, 'session_id' => $userId ? null : $sessionId],
+                    ['case_id' => 'UMUM-'.date('Ymd').'-'.strtoupper(Str::random(4))]
+                );
+
+                // 2. Simpan Pesan Warga
+                $userMsg = ChatMessage::create([
+                    'chat_room_id' => $room->id,
+                    'sender_type' => 'user',
+                    'message' => $request->message,
+                    'reply_to_id' => $request->reply_to_id ?? null,
+                ]);
+
+                if ($room->is_locked) {
+                    return response()->json([
+                        'status' => 'success',
+                        'is_locked' => true,
+                        'session_id' => $sessionId,
+                        'persist_to_db' => true,
+                        'store_locally' => false,
+                    ]);
+                }
 
                 // Jika bahaya meningkat, perbarui ID Kasus (cth: UMUM-xxx jadi K5-xxx)
                 if ($kategori !== 'NON_KDRT' && $kategori !== 'SAPAAN' && $room->latest_category !== $kategori) {
@@ -109,7 +126,13 @@ class ChatController extends Controller
                     'instruction' => $this->getInstruction($kategori),
                 ]);
 
-                return response()->json(['status' => 'success', 'session_id' => $sessionId, 'is_locked' => $isEmergency]);
+                return response()->json([
+                    'status' => 'success',
+                    'session_id' => $sessionId,
+                    'is_locked' => $isEmergency,
+                    'persist_to_db' => true,
+                    'store_locally' => false,
+                ]);
             } else {
                 return response()->json(['error' => 'API FastAPI merespon error: '.$response->status()], 500);
             }

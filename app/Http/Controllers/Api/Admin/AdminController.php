@@ -19,19 +19,21 @@ class AdminController extends Controller
             // 1. Hitung Total User Terdaftar (Warga)
             $totalUsers = User::where('role', '!=', 'admin')->count();
 
+            $visibleRooms = $this->visibleAnonymousEmergencyRooms();
+
             // 2. Hitung Total Interaksi Chat (Room)
-            $totalChats = ChatRoom::count();
+            $totalChats = $visibleRooms->count();
 
             // 3. Ambil Distribusi Kategori (K1-K6, dll)
             // Menghitung berapa banyak room untuk setiap kategori yang ada
-            $categoryDistribution = ChatRoom::select('latest_category', DB::raw('count(*) as total'))
+            $categoryDistribution = $visibleRooms->select('latest_category', DB::raw('count(*) as total'))
                 ->whereNotNull('latest_category')
                 ->groupBy('latest_category')
                 ->pluck('total', 'latest_category')
                 ->toArray();
 
             // 4. Ambil 5 Riwayat Interaksi Terbaru
-            $recentReports = ChatRoom::with(['user:id,nama_lengkap', 'messages' => function ($q) {
+            $recentReports = $visibleRooms->with(['user:id,nama_lengkap', 'messages' => function ($q) {
                 $q->latest()->limit(1);
             }])
                 ->orderBy('updated_at', 'desc')
@@ -79,7 +81,7 @@ class AdminController extends Controller
         $search = $request->query('search');
         $month = $request->query('month');
 
-        $reports = ChatRoom::with(['user:id,nama_lengkap', 'messages' => function ($q) {
+        $reports = $this->visibleAnonymousEmergencyRooms()->with(['user:id,nama_lengkap', 'messages' => function ($q) {
             $q->latest()->limit(1);
         }])
             ->when($search, function ($query) use ($search) {
@@ -105,7 +107,7 @@ class AdminController extends Controller
 
     public function getReportDetail($id)
     {
-        $room = ChatRoom::with(['user', 'messages.replyTo'])->findOrFail($id);
+        $room = $this->visibleAnonymousEmergencyRooms()->with(['user', 'messages.replyTo'])->findOrFail($id);
 
         $formattedThread = $room->messages->map(function ($msg) {
             return [
@@ -134,7 +136,7 @@ class AdminController extends Controller
 
     public function replyToUser(Request $request, $id)
     {
-        $room = ChatRoom::findOrFail($id);
+        $room = $this->visibleAnonymousEmergencyRooms()->findOrFail($id);
 
         ChatMessage::create([
             'chat_room_id' => $room->id,
@@ -150,7 +152,7 @@ class AdminController extends Controller
 
     public function closeCase($id)
     {
-        ChatRoom::findOrFail($id)->update(['is_locked' => false]);
+        $this->visibleAnonymousEmergencyRooms()->findOrFail($id)->update(['is_locked' => false]);
 
         return response()->json(['status' => 'success']);
     }
@@ -161,7 +163,7 @@ class AdminController extends Controller
         $month = $request->query('month');
 
         // 1. Ambil data ruangan beserta SEMUA pesannya (diurutkan dari terlama ke terbaru)
-        $reports = ChatRoom::with(['user:id,nama_lengkap', 'messages' => function ($q) {
+        $reports = $this->visibleAnonymousEmergencyRooms()->with(['user:id,nama_lengkap', 'messages' => function ($q) {
             $q->orderBy('created_at', 'asc');
         }])
             ->when($search, function ($query) use ($search) {
@@ -197,5 +199,12 @@ class AdminController extends Controller
 
         // 3. Download Excel
         return Excel::download(new ReportsExport($allMessages), 'laporan-safetalk-'.now()->format('Y-m-d').'.xlsx');
+    }
+
+    private function visibleAnonymousEmergencyRooms()
+    {
+        return ChatRoom::where('latest_category', 'K5')
+            ->whereNotNull('session_id')
+            ->whereNull('user_id');
     }
 }
