@@ -19,23 +19,27 @@ class AdminController extends Controller
             // 1. Hitung Total User Terdaftar (Warga)
             $totalUsers = User::where('role', '!=', 'admin')->count();
 
-            $visibleRooms = $this->visibleAnonymousEmergencyRooms();
+            // Use fresh query builders for each aggregation to avoid persisting
+            // SELECT/GROUP/ORDER clauses between calls which can trigger
+            // MySQL ONLY_FULL_GROUP_BY errors.
 
             // 2. Hitung Total Interaksi Chat (Room)
-            $totalChats = $visibleRooms->count();
+            $totalChats = $this->visibleAnonymousEmergencyRooms()->count();
 
             // 3. Ambil Distribusi Kategori (K1-K6, dll)
             // Menghitung berapa banyak room untuk setiap kategori yang ada
-            $categoryDistribution = $visibleRooms->select('latest_category', DB::raw('count(*) as total'))
+            $categoryDistribution = $this->visibleAnonymousEmergencyRooms()
+                ->select('latest_category', DB::raw('count(*) as total'))
                 ->whereNotNull('latest_category')
                 ->groupBy('latest_category')
                 ->pluck('total', 'latest_category')
                 ->toArray();
 
-            // 4. Ambil 5 Riwayat Interaksi Terbaru
-            $recentReports = $visibleRooms->with(['user:id,nama_lengkap', 'messages' => function ($q) {
-                $q->latest()->limit(1);
-            }])
+            // 4. Ambil 5 Riwayat Interaksi Terbaru (fresh builder)
+            $recentReports = $this->visibleAnonymousEmergencyRooms()
+                ->with(['user:id,nama_lengkap', 'messages' => function ($q) {
+                    $q->latest()->limit(1);
+                }])
                 ->orderBy('updated_at', 'desc')
                 ->limit(5) // <--- INI ADALAH BATASNYA (Limit dari database langsung)
                 ->get()
